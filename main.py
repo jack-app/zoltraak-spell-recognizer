@@ -1,16 +1,23 @@
-import sounddevice as sd
-import numpy as np
 import mmap
 import os
-from typing import List, Tuple, Optional
+from typing import List, Optional, Tuple
+
 import matplotlib.pyplot as plt
+import numpy as np
+import sounddevice as sd
 from matplotlib.animation import FuncAnimation
-import japanize_matplotlib
+
+# 日本語表示のための設定
+pass  # NOQA
+import japanize_matplotlib  # NOQA
+
+
 class SpellRecognizer:
     """
     呪文認識システムのメインクラス。
     音声入力から呪文を認識し、メモリマップトファイルを通じて結果を共有します。
     """
+
     # 認識のインターバル（秒）
     RECOGNIZE_INTERVAL_SECONDS = 0.5
     # 認識に使用するウィンドウサイズ（秒）
@@ -39,14 +46,14 @@ class SpellRecognizer:
         self.fig, self.ax = plt.subplots(figsize=(10, 4))
         self.ax.set_ylim(-1, 1)
         self.ax.set_xlim(0, self.RECOGNIZE_WINDOW_SECONDS)
-        self.ax.set_xlabel('時間 (秒)')
-        self.ax.set_ylabel('振幅')
-        self.ax.set_title('リアルタイム音声波形')
+        self.ax.set_xlabel("時間 (秒)")
+        self.ax.set_ylabel("振幅")
+        self.ax.set_title("リアルタイム音声波形")
         self.ax.grid(True)
 
         # 時間軸の生成
         self.time = np.linspace(0, self.RECOGNIZE_WINDOW_SECONDS, self.window_samples)
-        self.line, = self.ax.plot(self.time, np.zeros(self.window_samples))
+        (self.line,) = self.ax.plot(self.time, np.zeros(self.window_samples))
 
     def update_plot(self, frame):
         """
@@ -60,7 +67,7 @@ class SpellRecognizer:
         """
         if self.audio_buffer is not None:
             self.line.set_ydata(self.audio_buffer.flatten())
-        return self.line,
+        return (self.line,)
 
     @staticmethod
     def list_audio_devices() -> List[Tuple[int, str]]:
@@ -73,8 +80,8 @@ class SpellRecognizer:
         devices = sd.query_devices()
         input_devices = []
         for i, device in enumerate(devices):
-            if device['max_input_channels'] > 0:
-                input_devices.append((i, device['name']))
+            if device["max_input_channels"] > 0:
+                input_devices.append((i, device["name"]))
         return input_devices
 
     @staticmethod
@@ -106,13 +113,13 @@ class SpellRecognizer:
         存在しない場合は /tmp/is_spell_detected と /tmp/spell_id を作成します。
         """
         # is_spell_detectedの初期化（1ビット）
-        if not os.path.exists('/tmp/is_spell_detected'):
-            with open('/tmp/is_spell_detected', 'wb') as f:
-                f.write(b'\x00')
+        if not os.path.exists("/tmp/is_spell_detected"):
+            with open("/tmp/is_spell_detected", "wb") as f:
+                f.write(b"\x00")
 
         # spell_idの初期化（int16）
-        if not os.path.exists('/tmp/spell_id'):
-            with open('/tmp/spell_id', 'wb') as f:
+        if not os.path.exists("/tmp/spell_id"):
+            with open("/tmp/spell_id", "wb") as f:
                 f.write(np.int16(0).tobytes())
 
     @staticmethod
@@ -124,13 +131,13 @@ class SpellRecognizer:
             spell_id (int): 検出された呪文ID（呪文が検出されない場合は0）
         """
         # is_spell_detectedの更新
-        with open('/tmp/is_spell_detected', 'r+b') as f:
+        with open("/tmp/is_spell_detected", "r+b") as f:
             mm = mmap.mmap(f.fileno(), 0)
             mm[0] = 1 if spell_id > 0 else 0
             mm.close()
 
         # spell_idの更新
-        with open('/tmp/spell_id', 'r+b') as f:
+        with open("/tmp/spell_id", "r+b") as f:
             mm = mmap.mmap(f.fileno(), 0)
             mm.write(np.int16(spell_id).tobytes())
             mm.close()
@@ -163,7 +170,7 @@ class SpellRecognizer:
 
         # デバイス情報の取得
         device_info = sd.query_devices(self.device_idx)
-        self.sample_rate = int(device_info['default_samplerate'])
+        self.sample_rate = int(device_info["default_samplerate"])
 
         # バッファサイズの計算
         self.window_samples = int(self.RECOGNIZE_WINDOW_SECONDS * self.sample_rate)
@@ -183,7 +190,12 @@ class SpellRecognizer:
         """
         try:
             # 最初のウィンドウ分の音声を録音
-            self.audio_buffer = sd.rec(self.window_samples, samplerate=self.sample_rate, channels=1, dtype=np.float32)
+            self.audio_buffer = sd.rec(
+                self.window_samples,
+                samplerate=self.sample_rate,
+                channels=1,
+                dtype=np.float32,
+            )
             sd.wait()
 
             # アニメーションの開始
@@ -191,18 +203,25 @@ class SpellRecognizer:
                 self.fig,
                 self.update_plot,
                 interval=int(self.RECOGNIZE_INTERVAL_SECONDS * 1000),  # ミリ秒単位
-                blit=True
+                blit=True,
             )
             plt.show(block=False)
 
             while True:
                 # インターバル分の音声を録音
-                new_audio = sd.rec(self.interval_samples, samplerate=self.sample_rate, channels=1, dtype=np.float32)
+                new_audio = sd.rec(
+                    self.interval_samples,
+                    samplerate=self.sample_rate,
+                    channels=1,
+                    dtype=np.float32,
+                )
                 sd.wait()
 
                 # バッファを更新（古いデータを削除し、新しいデータを追加）
-                self.audio_buffer = np.roll(self.audio_buffer, -self.interval_samples, axis=0)
-                self.audio_buffer[-self.interval_samples:] = new_audio
+                self.audio_buffer = np.roll(
+                    self.audio_buffer, -self.interval_samples, axis=0
+                )
+                self.audio_buffer[-self.interval_samples :] = new_audio
 
                 # 音声認識
                 spell_id = self.recognize_speech(self.audio_buffer)
@@ -227,6 +246,7 @@ class SpellRecognizer:
                 self.animation.event_source.stop()
             plt.close()
 
+
 def main() -> None:
     """
     メイン関数。呪文認識システムを初期化して実行します。
@@ -234,6 +254,7 @@ def main() -> None:
     recognizer = SpellRecognizer()
     recognizer.initialize()
     recognizer.run()
+
 
 if __name__ == "__main__":
     main()
