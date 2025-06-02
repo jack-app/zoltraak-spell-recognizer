@@ -11,6 +11,7 @@ dependencies = [
     "numpy==1.26.4",
     "scikit-learn>=1.6.1",
     "sounddevice==0.4.6",
+    "soundfile>=0.12.1",
     "speechbrain>=1.0.3",
     "torch>=2.7.0",
     "torchaudio>=2.7.0",
