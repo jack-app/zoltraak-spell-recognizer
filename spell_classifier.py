@@ -277,13 +277,13 @@ class SpellClassifier:
 
         return features_list
 
-    def classify(self, features: np.ndarray, min_samples: int = 3) -> Optional[int]:
+    def classify(self, audio_data: torch.Tensor, sr: int) -> Optional[int]:
         """
         特徴量を分類します。
 
         Args:
-            features (np.ndarray): 分類する特徴量
-            min_samples (int, optional): 判定に必要な最小サンプル数。デフォルトは3。
+            audio_data (torch.Tensor): 分類する音声, shape=(length,)
+            sr (int): サンプリングレート
 
         Returns:
             Optional[int]: 分類結果のクラスID。分類できない場合はNone。
@@ -291,13 +291,13 @@ class SpellClassifier:
         if not self.samples:
             return None
 
+        features = self.process_audio(audio_data, sr)
+
         # 各クラスとの距離を計算
         min_distance = float("inf")
         best_class_id = None
 
         for class_id, class_samples in self.samples.items():
-            if len(class_samples) < min_samples:
-                continue
 
             # クラス内の各サンプルとの距離を計算
             distances = [

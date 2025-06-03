@@ -65,18 +65,18 @@ class HuBERTEncoder(BaseAudioEncoder):
             )
 
         # サンプリングレートを16000Hzに変更
-        if sample_rate != 16000:
-            audio_data = librosa.resample(
-                audio_data.numpy(),
-                orig_sr=sample_rate,
-                target_sr=16000,
-            )
-            sample_rate = 16000
-            inputs = torch.tensor(audio_data)
+        # if sample_rate != 16000:
+        #     audio_data = librosa.resample(
+        #         audio_data.numpy(),
+        #         orig_sr=sample_rate,
+        #         target_sr=16000,
+        #     )
+        #     sample_rate = 16000
+        #     inputs = torch.tensor(audio_data)
 
         # 特徴量抽出
         inputs = self.feature_extractor(
-            audio_data,
+            audio_data.numpy(),
             sampling_rate=sample_rate,
             return_tensors="pt",
         )
@@ -84,7 +84,7 @@ class HuBERTEncoder(BaseAudioEncoder):
         # モデルでエンコード
         with torch.no_grad():
             outputs = self.model(**inputs)
-            embedding = outputs.last_hidden_state  # (1, seq_len, hidden_dim)
+            embedding = outputs.last_hidden_state.squeeze(0)  # (1, seq_len, hidden_dim)
             embedding = embedding.reshape(-1)  # (seq_len * hidden_dim,)
 
         return embedding

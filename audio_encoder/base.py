@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import List
 
 import numpy as np
+import torch
 
 
 class BaseAudioEncoder(ABC):
@@ -11,16 +12,16 @@ class BaseAudioEncoder(ABC):
     """
 
     @abstractmethod
-    def encode(self, audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
+    def encode(self, audio_data: torch.Tensor, sample_rate: int) -> torch.Tensor:
         """
         音声データをエンコードします。
 
         Args:
-            audio_data (np.ndarray): 入力音声データ
+            audio_data (torch.Tensor): 入力音声データ
             sample_rate (int): サンプルレート
 
         Returns:
-            np.ndarray: エンコードされた特徴量
+            torch.Tensor: エンコードされた特徴量
         """
         pass
 

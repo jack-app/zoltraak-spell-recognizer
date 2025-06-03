@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import List
 
 import numpy as np
+import torch
 
 
 class BaseSourceSeparator(ABC):
@@ -11,7 +12,7 @@ class BaseSourceSeparator(ABC):
     """
 
     @abstractmethod
-    def separate(self, audio_data: np.ndarray, sample_rate: int) -> List[np.ndarray]:
+    def separate(self, audio_data: np.ndarray, sample_rate: int) -> List[torch.Tensor]:
         """
         音声データから音源を分離します。
 
@@ -20,7 +21,7 @@ class BaseSourceSeparator(ABC):
             sample_rate (int): サンプルレート
 
         Returns:
-            List[np.ndarray]: 分離された音声データのリスト。
+            List[torch.Tensor]: 分離された音声データのリスト。
                 最初の要素が目的の音源、残りの要素がその他の音源となります。
         """
         pass

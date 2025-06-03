@@ -157,12 +157,13 @@ class SpellRecognizer:
             mm.write(np.int16(spell_id).tobytes())
             mm.close()
 
-    def recognize_speech(self, audio_data: np.ndarray) -> int:
+    def recognize_speech(self, audio_data: np.ndarray, sr: int) -> int:
         """
         音声データから呪文を認識します。
 
         Args:
             audio_data (np.ndarray): 処理する音声データ
+            sr (int): サンプリングレート
 
         Returns:
             int: 呪文ID（呪文が検出されない場合は0、検出された場合は1以上）
@@ -170,14 +171,9 @@ class SpellRecognizer:
         # 音声データをtorch.Tensorに変換
         audio_tensor = torch.tensor(audio_data, dtype=torch.float32)
 
-        # 音源分離と特徴量抽出
-        features_list = self.classifier.process_audio(audio_tensor, self.sample_rate)
-
-        # 各音源を分類
-        for features in features_list:
-            spell_id = self.classifier.classify(features, min_samples=3)
-            if spell_id is not None:
-                return spell_id
+        spell_id = self.classifier.classify(audio_tensor, sr)
+        if spell_id is not None:
+            return spell_id
 
         return 0
 

@@ -53,11 +53,4 @@ class SepformerSeparator(BaseSourceSeparator):
         # 音源分離
         separated = self.separator.separate_batch(audio_data)[0]  # (3, length)
 
-        # 各チャンネルを16kHzにリサンプリング
-        separated_channels = []
-        for i in range(3):
-            channel = separated[:, i].unsqueeze(0)  # (1, length)
-            resampled = F.resample(channel, orig_freq=8000, new_freq=16000).squeeze(0)
-            separated_channels.append(resampled)
-
-        return separated_channels
+        return separated
