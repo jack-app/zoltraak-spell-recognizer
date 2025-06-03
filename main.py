@@ -1,15 +1,20 @@
 import mmap
 import os
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import sounddevice as sd
+import torch
 from matplotlib.animation import FuncAnimation
 
 # 日本語表示のための設定
 pass  # NOQA
 import japanize_matplotlib  # NOQA
+
+from audio_encoder.hubert import HuBERTEncoder
+from source_separation.sepformer import SepformerSeparator
+from spell_classifier import SpellClassifier
 
 
 class SpellRecognizer:
@@ -21,7 +26,7 @@ class SpellRecognizer:
     # 認識のインターバル（秒）
     RECOGNIZE_INTERVAL_SECONDS = 0.5
     # 認識に使用するウィンドウサイズ（秒）
-    RECOGNIZE_WINDOW_SECONDS = 1.0
+    RECOGNIZE_WINDOW_SECONDS = 0.75
 
     def __init__(self):
         """
@@ -38,6 +43,16 @@ class SpellRecognizer:
         self.ax = None
         self.line = None
         self.animation = None
+
+        # 分類器の初期化
+        self.source_separator = SepformerSeparator()
+        self.audio_encoder = HuBERTEncoder(max_length=4608)
+        self.classifier = SpellClassifier(
+            source_separator=self.source_separator,
+            audio_encoder=self.audio_encoder,
+            distance_threshold=0.5,
+            distance_type="euclidean",
+        )
 
     def setup_plot(self):
         """
@@ -142,11 +157,9 @@ class SpellRecognizer:
             mm.write(np.int16(spell_id).tobytes())
             mm.close()
 
-    @staticmethod
-    def recognize_speech(audio_data: np.ndarray) -> int:
+    def recognize_speech(self, audio_data: np.ndarray) -> int:
         """
-        音声データから音声を認識します。
-        現在はプレースホルダーとして0を返します。
+        音声データから呪文を認識します。
 
         Args:
             audio_data (np.ndarray): 処理する音声データ
@@ -154,7 +167,18 @@ class SpellRecognizer:
         Returns:
             int: 呪文ID（呪文が検出されない場合は0、検出された場合は1以上）
         """
-        # TODO: 実際の音声認識を実装する
+        # 音声データをtorch.Tensorに変換
+        audio_tensor = torch.tensor(audio_data, dtype=torch.float32)
+
+        # 音源分離と特徴量抽出
+        features_list = self.classifier.process_audio(audio_tensor, self.sample_rate)
+
+        # 各音源を分類
+        for features in features_list:
+            spell_id = self.classifier.classify(features, min_samples=3)
+            if spell_id is not None:
+                return spell_id
+
         return 0
 
     def initialize(self) -> None:
@@ -164,6 +188,11 @@ class SpellRecognizer:
         """
         # メモリマップトファイルの初期化
         self.initialize_memory_mapped_files()
+
+        # 分類器の初期化
+        print("Initializing classifier...")
+        self.classifier.initialize()
+        print("Classifier initialized")
 
         # オーディオデバイスの選択
         self.device_idx = self.select_audio_device()
@@ -224,12 +253,11 @@ class SpellRecognizer:
                 self.audio_buffer[-self.interval_samples :] = new_audio
 
                 # 音声認識
-                spell_id = self.recognize_speech(self.audio_buffer)
+                spell_id = self.recognize_speech(self.audio_buffer.flatten())
 
-                print(f"呪文ID: {spell_id}")
-
-                # 呪文が検出された場合、メモリマップトファイルを更新
                 if spell_id > 0:
+                    print(f"呪文を検出: ID {spell_id}")
+                    # 呪文が検出された場合、メモリマップトファイルを更新
                     self.update_memory_mapped_files(spell_id)
 
                 # プロットの更新
@@ -240,11 +268,11 @@ class SpellRecognizer:
             if self.animation is not None:
                 self.animation.event_source.stop()
             plt.close()
-        except Exception as e:
-            print(f"エラー: {e}")
-            if self.animation is not None:
-                self.animation.event_source.stop()
-            plt.close()
+        # except Exception as e:
+        #     print(f"エラー: {e}")
+        #     if self.animation is not None:
+        #         self.animation.event_source.stop()
+        #     plt.close()
 
 
 def main() -> None:

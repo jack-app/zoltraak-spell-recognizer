@@ -1,12 +1,16 @@
 import os
+import warnings
 from typing import Dict, List, Literal, Optional
 
+import librosa
 import numpy as np
 import soundfile as sf
+import torch
 from tqdm import tqdm
 
 from audio_encoder.base import BaseAudioEncoder
 from source_separation.base import BaseSourceSeparator
+from utils.audio import remove_silence
 
 
 def euclidean_distance(x: np.ndarray, y: np.ndarray) -> float:
@@ -140,9 +144,15 @@ class SampleManager:
 
 class SpellClassifier:
     """
-    呪文認識のための分類器クラス。
-    音源分離と音声エンコーディングを統合し、呪文の認識を行います。
+    呪文分類器クラス。
+    音源分離と特徴量抽出を行い、アンカーサンプルとの距離に基づいて呪文を分類します。
     """
+
+    DISTANCE_FUNCTIONS = {
+        "euclidean": euclidean_distance,
+        "cosine": cosine_distance,
+        "manhattan": manhattan_distance,
+    }
 
     def __init__(
         self,
@@ -152,140 +162,42 @@ class SpellClassifier:
         distance_threshold: float = 0.5,
     ):
         """
-        分類器を初期化します。
+        呪文分類器を初期化します。
 
         Args:
-            source_separator (BaseSourceSeparator): 音源分離器のインスタンス
-            audio_encoder (BaseAudioEncoder): 音声エンコーダーのインスタンス
+            source_separator (BaseSourceSeparator): 音源分離器
+            audio_encoder (BaseAudioEncoder): 音声エンコーダー
             distance_type (Literal["euclidean", "cosine", "manhattan"]): 使用する距離関数
             distance_threshold (float): 距離の閾値
         """
+        self.samples: Dict[int, List[np.ndarray]] = {}
+        self.distance_threshold = distance_threshold
+        self.distance_func = self.DISTANCE_FUNCTIONS[distance_type]
         self.source_separator = source_separator
         self.audio_encoder = audio_encoder
-        self.initialized = False
-        self.sample_manager = SampleManager(
-            distance_type=distance_type,
-            distance_threshold=distance_threshold,
-        )
+        self.distance_threshold = distance_threshold
+        self.samples: Dict[int, List[np.ndarray]] = {}
+        self.load_anchor_samples("anchors")
 
     def initialize(self) -> None:
         """
         分類器を初期化します。
-        音源分離器と音声エンコーダーを初期化し、サンプルデータを読み込みます。
+        音源分離器と音声エンコーダーを初期化します。
         """
-        if not self.initialized:
-            self.source_separator.initialize()
-            self.audio_encoder.initialize()
-            self._load_anchor_samples()
-            self.initialized = True
+        self.source_separator.initialize()
+        self.audio_encoder.initialize()
 
-    def _load_anchor_samples(self) -> None:
+    def add_sample(self, class_id: int, features: np.ndarray) -> None:
         """
-        anchorsディレクトリからサンプルデータを読み込みます。
-        各クラスIDのディレクトリ内のWAVファイルを読み込み、特徴量に変換します。
-        """
-        anchors_dir = "anchors"
-        if not os.path.exists(anchors_dir):
-            print(f"Warning: {anchors_dir} directory not found")
-            return
-
-        # 各クラスIDのディレクトリを処理
-        class_ids = [
-            d
-            for d in os.listdir(anchors_dir)
-            if os.path.isdir(os.path.join(anchors_dir, d))
-        ]
-
-        for class_id_str in tqdm(class_ids, desc="Loading class IDs"):
-            try:
-                class_id = int(class_id_str)
-                class_dir = os.path.join(anchors_dir, class_id_str)
-
-                # ディレクトリ内のWAVファイルを処理
-                wav_files = [f for f in os.listdir(class_dir) if f.endswith(".wav")]
-
-                for wav_file in tqdm(
-                    wav_files,
-                    desc=f"Loading WAV files for class {class_id}",
-                    leave=False,
-                ):
-                    wav_path = os.path.join(class_dir, wav_file)
-                    try:
-                        # WAVファイルを読み込み
-                        audio_data, sample_rate = sf.read(wav_path)
-
-                        # 特徴量に変換
-                        features = self.audio_encoder.encode(audio_data, sample_rate)
-
-                        # サンプルとして追加
-                        self.sample_manager.add_sample(class_id, features)
-                    except Exception as e:
-                        print(f"Error loading {wav_path}: {e}")
-
-            except ValueError:
-                print(f"Warning: Invalid class ID directory: {class_id_str}")
-
-    def process_audio(
-        self, audio_data: np.ndarray, sample_rate: int
-    ) -> List[np.ndarray]:
-        """
-        音声データを処理します。
-        音源分離を行い、分離された音声をエンコードします。
+        サンプルを追加します。
 
         Args:
-            audio_data (np.ndarray): 入力音声データ
-            sample_rate (int): サンプルレート
-
-        Returns:
-            List[np.ndarray]: 各音源の特徴量のリスト。
-                最初の要素が目的の音源の特徴量、残りの要素がその他の音源の特徴量となります。
-        """
-        if not self.initialized:
-            raise RuntimeError(
-                "Classifier is not initialized. Call initialize() first."
-            )
-
-        # 音源分離
-        separated_audios = self.source_separator.separate(audio_data, sample_rate)
-
-        # 各音源をエンコード
-        encoded_features = [
-            self.audio_encoder.encode(audio, sample_rate) for audio in separated_audios
-        ]
-
-        return encoded_features
-
-    def classify(self, features: np.ndarray, min_samples: int = 3) -> Optional[int]:
-        """
-        特徴量から呪文を分類します。
-
-        Args:
-            features (np.ndarray): 分類対象の特徴量
-            min_samples (int): 分類に必要な最小サンプル数
-
-        Returns:
-            Optional[int]: 分類された呪文ID。分類できない場合はNone
-        """
-        return self.sample_manager.get_nearest_spell(features, min_samples)
-
-    def add_sample(self, spell_id: int, features: np.ndarray) -> None:
-        """
-        新しいサンプルを追加します。
-
-        Args:
-            spell_id (int): 呪文ID
+            class_id (int): クラスID
             features (np.ndarray): 特徴量
         """
-        self.sample_manager.add_sample(spell_id, features)
-
-    def set_distance_threshold(self, threshold: float) -> None:
-        """
-        距離の閾値を設定します。
-
-        Args:
-            threshold (float): 新しい閾値
-        """
-        self.sample_manager.set_distance_threshold(threshold)
+        if class_id not in self.samples:
+            self.samples[class_id] = []
+        self.samples[class_id].append(features)
 
     def get_feature_dimension(self) -> int:
         """
@@ -294,8 +206,127 @@ class SpellClassifier:
         Returns:
             int: 特徴量の次元数
         """
-        if not self.initialized:
-            raise RuntimeError(
-                "Classifier is not initialized. Call initialize() first."
-            )
         return self.audio_encoder.get_feature_dimension()
+
+    def load_anchor_samples(self, anchors_dir: str) -> None:
+        """
+        アンカーサンプルを読み込みます。
+
+        Args:
+            anchors_dir (str): アンカーサンプルのディレクトリパス
+        """
+        if not os.path.exists(anchors_dir):
+            raise FileNotFoundError(
+                f"アンカーディレクトリが見つかりません: {anchors_dir}"
+            )
+
+        # クラスIDごとのディレクトリを処理
+        for class_id in tqdm(os.listdir(anchors_dir), desc="Loading anchor classes"):
+            class_dir = os.path.join(anchors_dir, class_id)
+            if not os.path.isdir(class_dir):
+                continue
+
+            try:
+                class_id_int = int(class_id)
+            except ValueError:
+                warnings.warn(f"無効なクラスIDディレクトリ: {class_id}")
+                continue
+
+            # WAVファイルを処理
+            wav_files = [f for f in os.listdir(class_dir) if f.endswith(".wav")]
+            for wav_file in tqdm(wav_files, desc=f"Loading class {class_id}"):
+                try:
+                    file_path = os.path.join(class_dir, wav_file)
+                    y, sr = librosa.load(file_path, sr=16000)
+                    y = remove_silence(y, sr=sr)
+
+                    # 音声データをtorch.Tensorに変換
+                    audio_tensor = torch.tensor(y, dtype=torch.float32)
+
+                    # 音源分離と特徴量抽出
+                    features_list = self.process_audio(audio_tensor, sr)
+
+                    # 各音源の特徴量を保存
+                    for i, features in enumerate(features_list):
+                        self.add_sample(class_id_int, features)
+
+                except Exception as e:
+                    print(f"Error loading {file_path}: {e}")
+                    continue
+
+    def process_audio(self, audio: torch.Tensor, sr: int) -> List[np.ndarray]:
+        """
+        音声データを処理します。
+        音源分離と特徴量抽出を行います。
+
+        Args:
+            audio (torch.Tensor): 入力音声データ
+            sr (int): サンプリングレート
+
+        Returns:
+            List[np.ndarray]: 各音源の特徴量のリスト
+        """
+        # 音源分離
+        separated_sources = self.source_separator.separate(audio, sr)
+
+        # 各音源の特徴量を抽出
+        features_list = []
+        for source in separated_sources:
+            features = self.audio_encoder.encode(source, sr)
+            features_list.append(features)
+
+        return features_list
+
+    def classify(self, features: np.ndarray, min_samples: int = 3) -> Optional[int]:
+        """
+        特徴量を分類します。
+
+        Args:
+            features (np.ndarray): 分類する特徴量
+            min_samples (int, optional): 判定に必要な最小サンプル数。デフォルトは3。
+
+        Returns:
+            Optional[int]: 分類結果のクラスID。分類できない場合はNone。
+        """
+        if not self.samples:
+            return None
+
+        # 各クラスとの距離を計算
+        min_distance = float("inf")
+        best_class_id = None
+
+        for class_id, class_samples in self.samples.items():
+            if len(class_samples) < min_samples:
+                continue
+
+            # クラス内の各サンプルとの距離を計算
+            distances = [
+                self.calculate_distance(features, sample) for sample in class_samples
+            ]
+
+            # 最小距離を取得
+            class_min_distance = min(distances)
+            if class_min_distance < min_distance:
+                min_distance = class_min_distance
+                best_class_id = class_id
+
+        # 閾値以下の距離の場合のみ分類結果を返す
+        if min_distance <= self.distance_threshold:
+            return best_class_id
+
+        return None
+
+    def calculate_distance(self, features1: np.ndarray, features2: np.ndarray) -> float:
+        """
+        2つの特徴量間の距離を計算します。
+
+        Args:
+            features1 (np.ndarray): 1つ目の特徴量
+            features2 (np.ndarray): 2つ目の特徴量
+
+        Returns:
+            float: 特徴量間の距離
+        """
+        # コサイン類似度を計算
+        similarity = self.distance_func(features1, features2)
+        return similarity
