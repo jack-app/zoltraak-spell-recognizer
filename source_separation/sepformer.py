@@ -51,6 +51,6 @@ class SepformerSeparator(BaseSourceSeparator):
             audio_data = audio_data.unsqueeze(0)  # (1, length)
 
         # 音源分離
-        separated = self.separator.separate_batch(audio_data)[0]  # (3, length)
+        separated = self.separator.separate_batch(audio_data)[0].T  # (3, length)
 
         return separated
