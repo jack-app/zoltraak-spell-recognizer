@@ -35,9 +35,11 @@ class SepformerSeparator(BaseSourceSeparator):
     def set_device(self, device: torch.device) -> None:
         """
         分離器を特定のデバイスに設定します。
-        sepformer speechbrain/sepformer-libri3mix はcpuのみ対応
         """
         self.output_tensor_device = device
+        self.separator = separator.from_hparams(
+            source=self.model_source, run_opts={"device": str(device)}
+        )
 
     def separate(
         self, audio_data: torch.Tensor, sample_rate: int
@@ -61,6 +63,7 @@ class SepformerSeparator(BaseSourceSeparator):
 
         # 音源分離
         audio_data = audio_data.to("cpu")
-        separated = self.separator.separate_batch(audio_data)[0].T  # (3, length)
+        with torch.no_grad():
+            separated = self.separator.separate_batch(audio_data)[0].T  # (3, length)
 
         return separated.to(self.output_tensor_device)

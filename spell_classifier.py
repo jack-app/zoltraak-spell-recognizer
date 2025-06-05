@@ -302,8 +302,6 @@ class SpellClassifier:
         Returns:
             List[np.ndarray]: 各音源の特徴量のリスト
         """
-        # 入力音声を適切なデバイスに移動
-        audio = audio.to(self.device)
 
         # 音源分離
         separated_sources = self.source_separator.separate(audio, sr)
