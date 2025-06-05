@@ -13,46 +13,73 @@ from source_separation.base import BaseSourceSeparator
 from utils.audio import remove_silence
 
 
-def euclidean_distance(x: np.ndarray, y: np.ndarray) -> float:
+def get_device() -> torch.device:
+    """
+    利用可能な最適なデバイスを取得します。
+    CUDA > Metal > CPU の優先順位で選択します。
+
+    Returns:
+        torch.device: 使用するデバイス
+    """
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+def euclidean_distance(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     """
     ユークリッド距離を計算します。
 
     Args:
-        x (np.ndarray): ベクトル1
-        y (np.ndarray): ベクトル2
+        x (np.ndarray): ベクトル1, shape=(sample_size_x, feature_dim)
+        y (np.ndarray): ベクトル2, shape=(sample_size_y, feature_dim)
 
     Returns:
-        float: ユークリッド距離
+        float: ユークリッド距離の行列. shape=(sample_size_x, sample_size_y)
     """
-    return np.linalg.norm(x - y)
+    x = torch.from_numpy(x).to(get_device())
+    y = torch.from_numpy(y).to(get_device())
+    x = x.unsqueeze(1)
+    y = y.unsqueeze(0)
+    return torch.linalg.norm(x - y, dim=-1).cpu().numpy()
 
 
-def cosine_distance(x: np.ndarray, y: np.ndarray) -> float:
+def cosine_distance(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     """
     コサイン距離を計算します。
 
     Args:
-        x (np.ndarray): ベクトル1
-        y (np.ndarray): ベクトル2
+        x (np.ndarray): ベクトル1, shape=(sample_size_x, feature_dim)
+        y (np.ndarray): ベクトル2, shape=(sample_size_y, feature_dim)
 
     Returns:
-        float: コサイン距離 (1 - コサイン類似度)
+        np.ndarray: コサイン距離の行列. shape=(sample_size_x, sample_size_y)
     """
-    return 1 - np.dot(x, y) / (np.linalg.norm(x) * np.linalg.norm(y))
+    x = torch.from_numpy(x).to(get_device())
+    y = torch.from_numpy(y).to(get_device())
+    x_norm = torch.linalg.norm(x, dim=1, keepdim=True)
+    y_norm = torch.linalg.norm(y, dim=1, keepdim=True)
+    return (1 - torch.mm(x, y.t()) / (x_norm * y_norm.t())).cpu().numpy()
 
 
-def manhattan_distance(x: np.ndarray, y: np.ndarray) -> float:
+def manhattan_distance(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     """
     マンハッタン距離を計算します。
 
     Args:
-        x (np.ndarray): ベクトル1
-        y (np.ndarray): ベクトル2
+        x (np.ndarray): ベクトル1, shape=(sample_size_x, feature_dim)
+        y (np.ndarray): ベクトル2, shape=(sample_size_y, feature_dim)
 
     Returns:
-        float: マンハッタン距離
+        np.ndarray: マンハッタン距離の行列. shape=(sample_size_x, sample_size_y)
     """
-    return np.sum(np.abs(x - y))
+    x = torch.from_numpy(x).to(get_device())
+    y = torch.from_numpy(y).to(get_device())
+    x = x.unsqueeze(1)
+    y = y.unsqueeze(0)
+    return torch.sum(torch.abs(x - y), dim=-1).cpu().numpy()
 
 
 class SampleManager:
@@ -177,6 +204,11 @@ class SpellClassifier:
         self.audio_encoder = audio_encoder
         self.distance_threshold = distance_threshold
         self.samples: Dict[int, List[np.ndarray]] = {}
+        self.device = get_device()
+        print(f"Using device: {self.device}")
+
+        self.initialize()
+
         self.load_anchor_samples("anchors")
 
     def initialize(self) -> None:
@@ -186,6 +218,9 @@ class SpellClassifier:
         """
         self.source_separator.initialize()
         self.audio_encoder.initialize()
+        # デバイスを設定
+        self.source_separator.set_device(self.device)
+        self.audio_encoder.set_device(self.device)
 
     def add_sample(self, class_id: int, features: np.ndarray) -> None:
         """
@@ -237,13 +272,14 @@ class SpellClassifier:
             for wav_file in tqdm(wav_files, desc=f"Loading class {class_id}"):
                 try:
                     file_path = os.path.join(class_dir, wav_file)
-                    y, sr = librosa.load(file_path, sr=16000)
+                    y, sr = librosa.load(file_path)
                     y = remove_silence(y, sr=sr)
 
                     # 音声データをtorch.Tensorに変換
-                    audio_tensor = torch.tensor(y, dtype=torch.float32)
+                    audio_tensor = torch.tensor(y, dtype=torch.float32).to(self.device)
 
                     # 音源分離と特徴量抽出
+                    print("Processing audio...")
                     features_list = self.process_audio(audio_tensor, sr)
 
                     # 各音源の特徴量を保存
@@ -251,7 +287,7 @@ class SpellClassifier:
                         self.add_sample(class_id_int, features)
 
                 except Exception as e:
-                    print(f"Error loading {file_path}: {e}")
+                    raise e
                     continue
 
     def process_audio(self, audio: torch.Tensor, sr: int) -> List[np.ndarray]:
@@ -266,6 +302,9 @@ class SpellClassifier:
         Returns:
             List[np.ndarray]: 各音源の特徴量のリスト
         """
+        # 入力音声を適切なデバイスに移動
+        audio = audio.to(self.device)
+
         # 音源分離
         separated_sources = self.source_separator.separate(audio, sr)
 
@@ -273,7 +312,7 @@ class SpellClassifier:
         features_list = []
         for source in separated_sources:
             features = self.audio_encoder.encode(source, sr)
-            features_list.append(features)
+            features_list.append(features.cpu().numpy())
 
         return features_list
 
@@ -291,21 +330,28 @@ class SpellClassifier:
         if not self.samples:
             return None
 
-        features = self.process_audio(audio_data, sr)
+        # 入力音声を適切なデバイスに移動
+        audio_data = audio_data.to(self.device)
 
-        # 各クラスとの距離を計算
+        features = self.process_audio(audio_data, sr)
+        features = np.array(features)  # shape=(num_sources, feature_dim)
+
         min_distance = float("inf")
         best_class_id = None
 
         for class_id, class_samples in self.samples.items():
+            # クラス内の全サンプルとの距離を一度に計算
+            class_samples_array = np.array(
+                class_samples
+            )  # shape=(num_samples, feature_dim)
+            distances = self.distance_func(
+                features, class_samples_array
+            )  # shape=(num_sources, num_samples)
 
-            # クラス内の各サンプルとの距離を計算
-            distances = [
-                self.calculate_distance(features, sample) for sample in class_samples
-            ]
+            # 各音源について最小距離を取得
+            min_distances = np.min(distances, axis=1)  # shape=(num_sources,)
+            class_min_distance = np.min(min_distances)  # 全音源の中での最小距離
 
-            # 最小距離を取得
-            class_min_distance = min(distances)
             if class_min_distance < min_distance:
                 min_distance = class_min_distance
                 best_class_id = class_id
@@ -315,18 +361,3 @@ class SpellClassifier:
             return best_class_id
 
         return None
-
-    def calculate_distance(self, features1: np.ndarray, features2: np.ndarray) -> float:
-        """
-        2つの特徴量間の距離を計算します。
-
-        Args:
-            features1 (np.ndarray): 1つ目の特徴量
-            features2 (np.ndarray): 2つ目の特徴量
-
-        Returns:
-            float: 特徴量間の距離
-        """
-        # コサイン類似度を計算
-        similarity = self.distance_func(features1, features2)
-        return similarity

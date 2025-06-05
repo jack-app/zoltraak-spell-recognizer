@@ -18,10 +18,12 @@ class SepformerSeparator(BaseSourceSeparator):
         Args:
             model_source (str): 使用するSepformerモデルのソース
         """
+        super().__init__()
         self.model_source = model_source
         self.separator = None
         self.initialized = False
         self.initialize()
+        self.output_tensor_device = torch.device("cpu")
 
     def initialize(self) -> None:
         """
@@ -29,6 +31,13 @@ class SepformerSeparator(BaseSourceSeparator):
         """
         self.separator = separator.from_hparams(source=self.model_source)
         self.initialized = True
+
+    def set_device(self, device: torch.device) -> None:
+        """
+        分離器を特定のデバイスに設定します。
+        sepformer speechbrain/sepformer-libri3mix はcpuのみ対応
+        """
+        self.output_tensor_device = device
 
     def separate(
         self, audio_data: torch.Tensor, sample_rate: int
@@ -51,6 +60,7 @@ class SepformerSeparator(BaseSourceSeparator):
             audio_data = audio_data.unsqueeze(0)  # (1, length)
 
         # 音源分離
+        audio_data = audio_data.to("cpu")
         separated = self.separator.separate_batch(audio_data)[0].T  # (3, length)
 
-        return separated
+        return separated.to(self.output_tensor_device)

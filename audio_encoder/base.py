@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 
-class BaseAudioEncoder(ABC):
+class BaseAudioEncoder(ABC, torch.nn.Module):
     """
     音声エンコーダーのベースクラス。
     すべての音声エンコーダーはこのクラスを継承する必要があります。
@@ -40,5 +40,12 @@ class BaseAudioEncoder(ABC):
 
         Returns:
             int: 特徴量の次元数
+        """
+        pass
+
+    @abstractmethod
+    def set_device(self, device: torch.device) -> None:
+        """
+        エンコーダーを特定のデバイスに設定します。
         """
         pass

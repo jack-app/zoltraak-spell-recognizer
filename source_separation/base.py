@@ -33,3 +33,10 @@ class BaseSourceSeparator(ABC):
         モデルのロードやパラメータの設定などを行います。
         """
         pass
+
+    @abstractmethod
+    def set_device(self, device: torch.device) -> None:
+        """
+        エンコーダーを特定のデバイスに設定します。
+        """
+        pass

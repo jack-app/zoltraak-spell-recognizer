@@ -1,4 +1,5 @@
 import librosa
+import numpy as np
 import torch
 from transformers import AutoFeatureExtractor, AutoModel
 
@@ -23,12 +24,19 @@ class HuBERTEncoder(BaseAudioEncoder):
             model_name (str): 使用するHuBERTモデルの名前
             max_length (int): 入力音声の最大長（サンプル数）
         """
+        super().__init__()
         self.model_name = model_name
         self.max_length = max_length
         self.feature_extractor = None
         self.model = None
         self.initialized = False
         self.initialize()
+
+    def set_device(self, device: torch.device) -> None:
+        """
+        エンコーダーを特定のデバイスに設定します。
+        """
+        self.model.to(device)
 
     def initialize(self) -> None:
         """
@@ -53,40 +61,39 @@ class HuBERTEncoder(BaseAudioEncoder):
         if not self.initialized:
             raise RuntimeError("Encoder is not initialized. Call initialize() first.")
 
+        audio_data = audio_data.cpu().numpy()
+
+        # サンプリングレートを16000Hzに変更
+        if sample_rate != 16000:
+            audio_data = librosa.resample(
+                audio_data,
+                orig_sr=sample_rate,
+                target_sr=16000,
+            )
+            sample_rate = 16000
+
         # 音声データの長さを調整
         if len(audio_data) > self.max_length:
             audio_data = audio_data[: self.max_length]
         elif len(audio_data) < self.max_length:
-            audio_data = torch.nn.functional.pad(
+            audio_data = np.pad(
                 audio_data,
-                (0, self.max_length - len(audio_data)),
+                (0, max_length - len(audio_data)),
                 mode="constant",
-                value=0,
+                constant_values=0,
             )
-
-        # サンプリングレートを16000Hzに変更
-        # if sample_rate != 16000:
-        #     audio_data = librosa.resample(
-        #         audio_data.numpy(),
-        #         orig_sr=sample_rate,
-        #         target_sr=16000,
-        #     )
-        #     sample_rate = 16000
-        #     inputs = torch.tensor(audio_data)
-
         # 特徴量抽出
         inputs = self.feature_extractor(
-            audio_data.numpy(),
+            audio_data,
             sampling_rate=sample_rate,
             return_tensors="pt",
-        )
+        ).to(self.model.device)
 
         # モデルでエンコード
         with torch.no_grad():
             outputs = self.model(**inputs)
             embedding = outputs.last_hidden_state.squeeze(0)  # (1, seq_len, hidden_dim)
             embedding = embedding.reshape(-1)  # (seq_len * hidden_dim,)
-
         return embedding
 
     def get_feature_dimension(self) -> int:

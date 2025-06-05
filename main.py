@@ -185,11 +185,6 @@ class SpellRecognizer:
         # メモリマップトファイルの初期化
         self.initialize_memory_mapped_files()
 
-        # 分類器の初期化
-        print("Initializing classifier...")
-        self.classifier.initialize()
-        print("Classifier initialized")
-
         # オーディオデバイスの選択
         self.device_idx = self.select_audio_device()
 
@@ -249,7 +244,9 @@ class SpellRecognizer:
                 self.audio_buffer[-self.interval_samples :] = new_audio
 
                 # 音声認識
-                spell_id = self.recognize_speech(self.audio_buffer.flatten())
+                spell_id = self.recognize_speech(
+                    self.audio_buffer.flatten(), self.sample_rate
+                )
 
                 if spell_id > 0:
                     print(f"呪文を検出: ID {spell_id}")
